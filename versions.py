@@ -27,16 +27,23 @@ class V2FullStackDeveloper(V1WebsiteGenerator):
 class V3AutonomousDebugger(V2FullStackDeveloper):
     number=3; name='Autonomous Debugging'
     def run(self,request,context=None):
-        r=super().run(request,context); p=r['project']; commands=r['plan'].get('test_commands',[])
-        results=self.tests.run(p,commands) if commands else []
-        fixes=[]
-        for _ in range(2):
+        r=super().run(request,context); p=r['project']
+        commands=r['plan'].get('test_commands',[])
+        timeout=getattr(self.config,'command_timeout',60) if self.config else 60
+        limit=getattr(self.config,'max_debug_iterations',3) if self.config else 3
+        results=self.tests.run(p,commands,timeout) if commands else []
+        history=[]
+        repairer=RepairEngine(self.planner.provider,self.pm,limit)
+        for i in range(limit):
             failed=[x for x in results if not x.passed]
             if not failed: break
-            fixes.append('Detected test failures; generated-project repair hook ready for AI provider.')
-            break
-        r['test_results']=results; r['debug_summary']={'tests':len(results),'passed':sum(x.passed for x in results),'failed':sum(not x.passed for x in results),'fix_attempts':len(fixes),'fix_log':fixes}; r['version']=3; return r
-
+            repair=repairer.repair(p,[{'command':x.name,'output':x.output[-12000:]} for x in failed])
+            repair['iteration']=i+1; history.append(repair)
+            if not repair.get('changed_files'): break
+            results=self.tests.run(p,commands,timeout)
+        r['test_results']=self.serial_results(results)
+        r['debug_summary']={**self.tests.summary(results),'iterations':len(history),'repair_history':history}
+        r['version']=3; return r
 class V4VisualQA(V3AutonomousDebugger):
     number=4; name='Browser / Visual QA'
     def run(self,request,context=None):
