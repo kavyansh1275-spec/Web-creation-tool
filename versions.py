@@ -1,6 +1,6 @@
 from pathlib import Path
 import json, re, shutil, zipfile
-from core import Planner
+from core import Planner, RepairEngine
 
 class BaseVersion:
     def __init__(self,pm,planner,tests): self.pm=pm; self.planner=planner; self.tests=tests
@@ -47,12 +47,35 @@ class V3AutonomousDebugger(V2FullStackDeveloper):
 class V4VisualQA(V3AutonomousDebugger):
     number=4; name='Browser / Visual QA'
     def run(self,request,context=None):
-        r=super().run(request,context); p=r['project']; snap=self.pm.snapshot(p); html=[x for x in snap if x.endswith('.html')]
+        r=super().run(request,context); p=r['project']; snap=self.pm.snapshot(p)
         checks=[]
-        for f in html:
-            text=snap[f].lower(); checks += [(f+':doctype', '<!doctype' in text), (f+':title', '<title' in text), (f+':viewport', 'viewport' in text)]
-        r['visual_qa']={'mode':'static-browser-preflight','files':len(html),'checks':checks,'passed':sum(v for _,v in checks),'total':len(checks)}; r['version']=4; return r
-
+        for f,t in snap.items():
+            if f.endswith('.html'):
+                low=t.lower()
+                checks += [(f+':doctype','<!doctype' in low),(f+':title','<title' in low),(f+':viewport','viewport' in low)]
+        browser={'available':False,'passed':True,'reason':'Playwright optional'}
+        try:
+            from playwright.sync_api import sync_playwright
+            import threading, http.server, os
+            class Handler(http.server.SimpleHTTPRequestHandler):
+                def log_message(self,*args): pass
+            old=os.getcwd(); os.chdir(p.root)
+            server=http.server.ThreadingHTTPServer(('127.0.0.1',0),Handler)
+            threading.Thread(target=server.serve_forever,daemon=True).start()
+            errors=[]
+            with sync_playwright() as pw:
+                browser_obj=pw.chromium.launch(headless=True)
+                page=browser_obj.new_page(viewport={'width':1280,'height':800})
+                page.on('pageerror',lambda e: errors.append(str(e)))
+                response=page.goto('http://127.0.0.1:'+str(server.server_port)+'/index.html',wait_until='networkidle',timeout=15000)
+                screenshot=p.root/'qa-screenshot.png'; page.screenshot(path=str(screenshot),full_page=True)
+                browser_obj.close()
+            server.shutdown(); server.server_close(); os.chdir(old)
+            browser={'available':True,'passed':bool(response and response.ok and not errors),'status':response.status if response else None,'errors':errors,'screenshot':str(screenshot)}
+        except Exception as e:
+            browser={'available':True,'passed':False,'reason':str(e)}
+        r['visual_qa']={'static_checks':checks,'browser':browser,'passed':all(x[1] for x in checks) and browser['passed']}
+        r['version']=4; return r
 class V5DeploymentAgent(V4VisualQA):
     number=5; name='Deployment Agent'
     def run(self,request,context=None):
