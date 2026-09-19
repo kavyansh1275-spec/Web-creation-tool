@@ -99,18 +99,32 @@ class V6ExistingProjectDeveloper(V5DeploymentAgent):
     number=6; name='Existing Project Developer'
     def run(self,request,context=None):
         existing=(context or {}).get('existing_project')
-        if existing:
-            root=Path(existing); root.mkdir(parents=True,exist_ok=True); project=self.pm.create(root.name)
-            # Preserve existing project by copying it into the managed workspace.
-            if root.resolve()!=project.root.resolve():
-                for src in root.rglob('*'):
-                    if src.is_file() and '.git' not in src.parts:
-                        dst=project.root/src.relative_to(root); dst.parent.mkdir(parents=True,exist_ok=True); shutil.copy2(src,dst)
-            plan={'project_name':project.name,'files':self.pm.snapshot(project),'test_commands':[]}
-            r={'version':6,'project':project,'plan':plan,'existing_project_mode':True,'validation':self.validate(project)}
-            return r
-        r=super().run(request,context); r['existing_project_mode']=False; r['version']=6; return r
-
+        if not existing:
+            r=super().run(request,context); r['existing_project_mode']=False; r['version']=6; return r
+        root=Path(existing).expanduser().resolve()
+        if not root.is_dir(): raise ValueError('Existing project not found: '+str(root))
+        project=self.pm.create(root.name)
+        for src in root.rglob('*'):
+            if src.is_file() and '.git' not in src.parts and 'node_modules' not in src.parts and '__pycache__' not in src.parts:
+                dst=project.root/src.relative_to(root); dst.parent.mkdir(parents=True,exist_ok=True); shutil.copy2(src,dst)
+        before=self.pm.snapshot(project); changed=False; explanation=''
+        if self.planner.provider.client:
+            prompt='Modify this project for the user request. Return ONLY JSON with files and explanation. Files must contain complete replacement contents.\nREQUEST:\n'+request+'\nPROJECT:\n'+json.dumps(before)
+            raw=self.planner.provider.generate(prompt)
+            try:
+                patch=self.planner.provider.extract_json(raw); files=patch.get('files',{})
+                self.pm.write_files(project,files); changed=bool(files); explanation=patch.get('explanation','')
+            except Exception as e: explanation='AI change failed: '+str(e)
+        snap=self.pm.snapshot(project)
+        commands=[]
+        if 'package.json' in snap:
+            try:
+                pkg=json.loads(snap['package.json']);
+                if pkg.get('scripts',{}).get('test'): commands=['npm test -- --runInBand']
+            except Exception: pass
+        results=self.tests.run(project,commands) if commands else []
+        r={'version':6,'project':project,'plan':{'project_name':project.name,'test_commands':commands},'existing_project_mode':True,'change_applied':changed,'change_explanation':explanation,'test_results':self.serial_results(results),'validation':self.validate(project)}
+        return r
 class V7AutonomousAIProductEngineer(V6ExistingProjectDeveloper):
     number=7; name='Autonomous AI Product Engineer'
     def run(self,request,context=None):
