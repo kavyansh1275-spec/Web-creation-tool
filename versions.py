@@ -79,12 +79,22 @@ class V4VisualQA(V3AutonomousDebugger):
 class V5DeploymentAgent(V4VisualQA):
     number=5; name='Deployment Agent'
     def run(self,request,context=None):
-        r=super().run(request,context); p=r['project']; artifact=p.root.parent/(p.root.name+'.zip')
+        r=super().run(request,context); p=r['project']
+        artifact=p.root.parent/(p.root.name+'.zip')
         with zipfile.ZipFile(artifact,'w',zipfile.ZIP_DEFLATED) as z:
             for f in p.root.rglob('*'):
-                if f.is_file(): z.write(f,f.relative_to(p.root))
-        r['deployment']={'provider':'artifact','ready':artifact.exists(),'artifact':str(artifact.resolve()),'external_hosting':'adapter-ready'}; r['version']=5; return r
-
+                if f.is_file() and f.name!='qa-screenshot.png': z.write(f,f.relative_to(p.root))
+        deploy={'provider':'none','success':False,'reason':'No deployment credentials configured'}
+        if os.getenv('VERCEL_TOKEN') and shutil.which('vercel'):
+            proc=subprocess.run(['vercel','--yes','--token',os.getenv('VERCEL_TOKEN')],cwd=p.root,text=True,capture_output=True,timeout=180)
+            out=(proc.stdout or '')+(proc.stderr or '')
+            deploy={'provider':'vercel','success':proc.returncode==0,'output':out[-12000:]}
+        elif os.getenv('NETLIFY_AUTH_TOKEN') and shutil.which('netlify'):
+            proc=subprocess.run(['netlify','deploy','--prod','--dir','.'],cwd=p.root,text=True,capture_output=True,timeout=180,env={**os.environ,'NETLIFY_AUTH_TOKEN':os.getenv('NETLIFY_AUTH_TOKEN')})
+            out=(proc.stdout or '')+(proc.stderr or '')
+            deploy={'provider':'netlify','success':proc.returncode==0,'output':out[-12000:]}
+        r['deployment']={'artifact':str(artifact.resolve()),'artifact_ready':artifact.exists(),'external':deploy}
+        r['version']=5; return r
 class V6ExistingProjectDeveloper(V5DeploymentAgent):
     number=6; name='Existing Project Developer'
     def run(self,request,context=None):
