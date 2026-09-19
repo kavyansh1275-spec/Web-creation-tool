@@ -2,10 +2,21 @@
 
 AI-assisted web/product engineering system with seven progressive capabilities.
 
-Versions: V1 Website Generator, V2 Full-Stack Developer, V3 Autonomous Debugging, V4 Browser/Visual QA, V5 Deployment Agent, V6 Existing Project Developer, V7 Autonomous AI Product Engineer.
+## Versions
+1. Website Generator
+2. Full-Stack Developer
+3. Autonomous Debugging
+4. Browser / Visual QA preflight
+5. Deployment packaging
+6. Existing Project Developer
+7. Autonomous AI Product Engineer
 
-Install: pip install -r requirements.txt
-Run tests: python -m pytest -q
-Run: python main.py
+## Run
+Install dependencies with `pip install -r requirements.txt`.
+Run CLI with `python main.py` or UI with `streamlit run app.py`.
+Set `GEMINI_API_KEY` to enable AI generation. Without a key, deterministic offline scaffolding and tests still work.
 
-Set GEMINI_API_KEY to enable AI generation. Tests run without an API key.
+## Testing
+Run `python -m pytest -q`. GitHub Actions also runs the test suite on pushes and pull requests.
+
+The repository is independent and does not depend on AI-Workflow-Orchestrator.
