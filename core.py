@@ -74,3 +74,22 @@ class Planner:
         raw=self.provider.generate(self.SYSTEM+'\nUser request:\n'+request)
         if raw: return self.provider.extract_json(raw)
         return {'project_name':'generated-web-app','files':{'index.html':"<!doctype html><html><head><meta charset='utf-8'><title>Generated App</title><link rel='stylesheet' href='styles.css'></head><body><main><h1>Generated Web App</h1><p>Project scaffold created successfully.</p></main></body></html>",'styles.css':"body{font-family:system-ui,sans-serif;margin:0;padding:3rem;line-height:1.5}"},'test_commands':[]}
+
+
+class RepairEngine:
+    def __init__(self, provider, pm, max_iterations=3):
+        self.provider, self.pm, self.max_iterations = provider, pm, max_iterations
+    def repair(self, project, failures):
+        if not self.provider.client or not failures:
+            return {'attempted': False, 'changed_files': [], 'reason': 'AI provider unavailable or no failures'}
+        prompt = 'Return ONLY JSON with files and explanation. files must contain complete replacement contents. Fix these failures.\nPROJECT:\n' + json.dumps(self.pm.snapshot(project)) + '\nFAILURES:\n' + json.dumps(failures)
+        raw = self.provider.generate(prompt)
+        try:
+            patch = self.provider.extract_json(raw)
+            files = patch.get('files', {})
+            if not isinstance(files, dict):
+                return {'attempted': True, 'changed_files': [], 'reason': 'invalid patch'}
+            self.pm.write_files(project, files)
+            return {'attempted': True, 'changed_files': list(files), 'explanation': patch.get('explanation', '')}
+        except Exception as e:
+            return {'attempted': True, 'changed_files': [], 'reason': str(e)}
