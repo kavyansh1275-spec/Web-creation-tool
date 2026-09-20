@@ -52,3 +52,9 @@ def test_project_snapshot_handles_binary(tmp_path):
     binary.write_bytes(bytes([0, 159, 255, 0]))
     snap = pm.snapshot(p)
     assert snap["asset.bin"].startswith("<binary file: ")
+
+
+def test_compile_imports_are_valid():
+    import py_compile
+    for name in ("app.py", "core.py", "versions.py", "deployer.py", "main.py"):
+        py_compile.compile(name, doraise=True)
