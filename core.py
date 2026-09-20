@@ -27,7 +27,13 @@ class ProjectManager:
     def write_files(self,project,files):
         if isinstance(files,list): files={x['path']:x['content'] for x in files}
         for rel,content in files.items():
-            path=project.root/rel; path.parent.mkdir(parents=True,exist_ok=True)
+            rel=str(rel).replace('\\\\','/').strip()
+            if not rel or rel.startswith('/') or re.match(r'^[A-Za-z]:',rel) or '..' in Path(rel).parts:
+                raise ValueError('Unsafe project path: '+rel)
+            path=(project.root/rel).resolve()
+            path.relative_to(project.root.resolve())
+            if not isinstance(content,str): raise ValueError('File content must be text: '+rel)
+            path.parent.mkdir(parents=True,exist_ok=True)
             path.write_text(content,encoding='utf-8'); project.files[rel]=content
     def snapshot(self,project):
         out={}
@@ -59,8 +65,19 @@ class AIProvider:
             except Exception: pass
     def generate(self,prompt):
         if not self.client: return ''
-        response=self.client.models.generate_content(model=self.model,contents=prompt)
-        return getattr(response,'text','') or ''
+        models=[x.strip() for x in os.getenv('WEB_CREATION_MODELS',self.model).split(',') if x.strip()]
+        last=None
+        for model in models:
+            try:
+                response=self.client.models.generate_content(model=model,contents=prompt)
+                text=getattr(response,'text','') or ''
+                if text.strip():
+                    self.model=model
+                    return text
+            except Exception as exc:
+                last=exc
+        if last: raise RuntimeError('All configured AI models failed: '+str(last))
+        return ''
     @staticmethod
     def extract_json(text):
         text=text.strip()
