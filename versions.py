@@ -58,6 +58,11 @@ class V3AutonomousDebugger(V2FullStackDeveloper):
         limit=getattr(self.config,'max_debug_iterations',3) if self.config else 3
         results=self.tests.run(p,commands,timeout) if commands else []; history=[]
         repairer=RepairEngine(self.planner.provider,self.pm,limit)
+        if not results and (supplied_project is not None or existing) and self.planner.provider.client:
+            repair=repairer.repair(p,[{'command':'manual-debug-request','output':request+'\nPROJECT:\n'+json.dumps(self.pm.snapshot(p))}])
+            repair['iteration']=1; history.append(repair)
+            if repair.get('changed_files'):
+                results=self.tests.run(p,commands,timeout) if commands else []
         for i in range(limit):
             failed=[x for x in results if not x.passed]
             if not failed: break
