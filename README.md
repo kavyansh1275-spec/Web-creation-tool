@@ -51,3 +51,7 @@ Deployment runtime detection:
 Generated test commands are allowlisted before execution. Unsafe shell constructs are rejected.
 
 CI regression tests run through GitHub Actions on pushes and pull requests to main.
+
+## Release verification
+
+Every release candidate can be verified through the pull-request regression workflow before it is merged to `main`. The workflow compiles the application modules, installs Playwright Chromium, runs the full pytest suite, and uploads the JUnit test report as an artifact. A release should only be merged after that workflow reports success.
