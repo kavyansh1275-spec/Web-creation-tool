@@ -36,3 +36,18 @@ For automatic deployment from the hosted Streamlit app, configure these environm
 Static HTML/CSS/JS projects are deployed as Render Static Sites and receive their own `onrender.com` URL. Projects containing server-side code are routed toward a Render Web Service configuration.
 
 The Web Creation Tool only reports a live URL when the external deployment actually succeeds. Otherwise it clearly reports that the project was generated but not publicly deployed.
+
+
+## Production safety gates
+
+The tool does not treat scaffolding as a successful production build. Before deployment, supported generated projects must pass the available automated tests and browser/visual QA. Unsupported deployment stacks are rejected rather than guessed.
+
+Deployment runtime detection:
+- Static HTML: Render Static Site
+- Node: requires package.json and a start script
+- Python: requires requirements.txt or pyproject.toml plus app.py or main.py
+- Unsupported/ambiguous stacks: deployment is blocked
+
+Generated test commands are allowlisted before execution. Unsafe shell constructs are rejected.
+
+CI regression tests run through GitHub Actions on pushes and pull requests to main.
