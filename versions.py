@@ -155,7 +155,10 @@ class V6ExistingProjectDeveloper(V5DeploymentAgent):
             except Exception: pass
         results=self.tests.run(project,commands) if commands else []
         result={'version':6,'project':project,'plan':{'project_name':project.name,'test_commands':commands},'existing_project_mode':True,'change_applied':changed,'change_explanation':explanation,'test_results':self.serial_results(results),'validation':self.validate(project)}
-        result['deployment']=GitHubRenderDeployer(project,self.config).deploy()
+        if changed:
+            result['deployment']=GitHubRenderDeployer(project,self.config).deploy()
+        else:
+            result['deployment']={'success':False,'provider':'render','reason':'No verified project modification was applied; deployment was intentionally skipped.'}
         return result
 
 class V7AutonomousAIProductEngineer(V6ExistingProjectDeveloper):
