@@ -5,7 +5,7 @@ from versions import build_pipeline
 
 def run(request,version=7,existing_project=None):
     if not 1<=version<=7: raise ValueError('version must be 1-7')
-    pipeline=build_pipeline(ProjectManager(CONFIG.workspace),AIProvider(CONFIG.api_key,CONFIG.model),TestRunner())
+    pipeline=build_pipeline(ProjectManager(CONFIG.workspace),AIProvider(CONFIG.api_key,CONFIG.model),TestRunner(),CONFIG)
     return pipeline[version-1].run(request,{'existing_project':existing_project} if existing_project else {})
 
 def main():
