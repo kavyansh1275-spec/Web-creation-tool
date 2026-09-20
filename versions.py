@@ -1,9 +1,9 @@
 from pathlib import Path
-import json, re, shutil, zipfile
+import json, re, shutil, zipfile, os, subprocess
 from core import Planner, RepairEngine
 
 class BaseVersion:
-    def __init__(self,pm,planner,tests): self.pm=pm; self.planner=planner; self.tests=tests
+    def __init__(self,pm,planner,tests,config=None): self.pm=pm; self.planner=planner; self.tests=tests; self.config=config
     def build(self,request,name=None):
         plan=self.planner.plan(request); project=self.pm.create(name or plan.get('project_name','generated-web-app')); self.pm.write_files(project,plan.get('files',{})); return project,plan
     def validate(self,project):
@@ -130,6 +130,6 @@ class V7AutonomousAIProductEngineer(V6ExistingProjectDeveloper):
     def run(self,request,context=None):
         r=super().run(request,context); p=r['project']; r['engineering_report']={'phases':['understand','plan','build','test','debug','browser-qa','package'],'project_files':len(self.pm.snapshot(p)),'status':'complete'}; r['version']=7; return r
 
-def build_pipeline(pm,provider,tests):
+def build_pipeline(pm,provider,tests,config=None):
     planner=Planner(provider)
-    return [V1WebsiteGenerator(pm,planner,tests),V2FullStackDeveloper(pm,planner,tests),V3AutonomousDebugger(pm,planner,tests),V4VisualQA(pm,planner,tests),V5DeploymentAgent(pm,planner,tests),V6ExistingProjectDeveloper(pm,planner,tests),V7AutonomousAIProductEngineer(pm,planner,tests)]
+    return [V1WebsiteGenerator(pm,planner,tests,config),V2FullStackDeveloper(pm,planner,tests,config),V3AutonomousDebugger(pm,planner,tests,config),V4VisualQA(pm,planner,tests,config),V5DeploymentAgent(pm,planner,tests,config),V6ExistingProjectDeveloper(pm,planner,tests,config),V7AutonomousAIProductEngineer(pm,planner,tests,config)]
