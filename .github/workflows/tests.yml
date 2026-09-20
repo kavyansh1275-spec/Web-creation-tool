@@ -17,3 +17,5 @@ jobs:
         run: python -m playwright install --with-deps chromium
       - name: Run tests
         run: python -m pytest -q
+
+# CI trigger: validate the current V1-V7 pipeline.
