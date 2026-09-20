@@ -83,7 +83,7 @@ class V3AutonomousDebugger(V2FullStackDeveloper):
             repair=repairer.repair(p,[{'command':x.name,'output':x.output[-12000:]} for x in failed]); repair['iteration']=i+1; history.append(repair)
             if not repair.get('changed_files'): break
             results=self.tests.run(p,commands,timeout)
-        r['test_results']=self.serial_results(results); r['debug_summary']={**self.tests.summary(results),'iterations':len(history),'repair_history':history}; r['version']=3; return r
+        r['test_results']=self.serial_results(results); r['debug_summary']={**self.tests.summary(results),'iterations':len(history),'repair_history':history}; r['quality_gate']={'passed': (not results) or all(x.passed for x in results), 'tests_defined': bool(commands), 'tests_executed': bool(results), 'tests_passed': bool(results) and all(x.passed for x in results)}; r['version']=3; return r
 
 class V4VisualQA(V3AutonomousDebugger):
     number=4; name='Browser / Visual QA'
