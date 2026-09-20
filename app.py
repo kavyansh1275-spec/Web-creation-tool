@@ -239,6 +239,8 @@ def show_result(result):
         st.json({key: value for key, value in result.items() if key != "project"})
 
 
+st.session_state.setdefault("chat", [])
+
 st.title("🛠️ Web Creation Tool")
 st.caption("Chat with the tool while it builds, modifies, debugs, tests, QA-checks and packages your projects.")
 
@@ -286,8 +288,8 @@ mode = st.session_state.get("mode")
 if mode == "create":
     st.divider()
     st.header("🌐 Web Creation")
-    description = st.text_area("Describe your website", height=160)
-    if st.button("Create Website", type="primary") and description.strip():
+    description = st.chat_input("Describe the website you want to create...")
+    if description and description.strip():
         st.session_state["chat"].append({"role": "user", "content": description.strip()})
         show_result(run_tool(2, description.strip()))
 
@@ -299,8 +301,8 @@ elif mode == "modify":
         st.info("No projects found in the workspace yet. Create a website first.")
     else:
         selected = st.selectbox("Choose your project", options)
-        request = st.text_area("What do you want to modify?", height=130)
-        if st.button("Modify Project", type="primary") and request.strip():
+        request = st.chat_input("Tell me what you want to change...")
+        if request and request.strip():
             st.session_state["chat"].append({"role": "user", "content": request.strip()})
             show_result(run_tool(6, request.strip(), {"existing_project": str(CONFIG.workspace / selected)}))
 
@@ -315,8 +317,8 @@ elif mode == "debug":
             st.info("No projects found in the workspace yet.")
         else:
             selected = st.selectbox("Choose your project to debug", options)
-            request = st.text_area("Describe the bug (optional)", height=100)
-            if st.button("Debug Project", type="primary"):
+            request = st.chat_input("Tell me what is wrong, or ask me to find all bugs...")
+            if request is not None:
                 request_text = request.strip() or "Find and fix bugs in this project."
                 st.session_state["chat"].append({"role": "user", "content": request_text})
                 show_result(run_tool(3, request_text, {"existing_project": str(CONFIG.workspace / selected)}))
@@ -359,8 +361,8 @@ elif mode == "deploy":
 elif mode == "full":
     st.divider()
     st.header("🤖 Full AI Product Engineer")
-    description = st.text_area("Describe the product you want built", height=160)
-    if st.button("Start Full Build", type="primary") and description.strip():
+    description = st.chat_input("Describe the product you want me to build...")
+    if description and description.strip():
         st.session_state["chat"].append({"role": "user", "content": description.strip()})
         show_result(run_tool(7, description.strip()))
 
