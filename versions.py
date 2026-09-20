@@ -128,7 +128,7 @@ class V6ExistingProjectDeveloper(V5DeploymentAgent):
 class V7AutonomousAIProductEngineer(V6ExistingProjectDeveloper):
     number=7; name='Autonomous AI Product Engineer'
     def run(self,request,context=None):
-        r=super().run(request,context); p=r['project']; r['engineering_report']={'phases':['understand','plan','build','test','debug','browser-qa','package'],'project_files':len(self.pm.snapshot(p)),'status':'complete'}; r['version']=7; return r
+        r=super().run(request,context); p=r['project']; r['engineering_report']={'phases':['understand','plan','build','test','debug','browser-qa','deploy/package'],'project_files':len(self.pm.snapshot(p)),'tests':r.get('debug_summary',r.get('test_results')),'visual_qa':r.get('visual_qa'),'deployment':r.get('deployment'),'status':'completed_with_report'}; r['version']=7; return r
 
 def build_pipeline(pm,provider,tests,config=None):
     planner=Planner(provider)
