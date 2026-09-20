@@ -30,7 +30,30 @@ class V2FullStackDeveloper(V1WebsiteGenerator):
 class V3AutonomousDebugger(V2FullStackDeveloper):
     number=3; name='Autonomous Debugging'
     def run(self,request,context=None):
-        r=super().run(request,context); p=r['project']; commands=r['plan'].get('test_commands',[])
+        context=context or {}
+        supplied_project=context.get('project')
+        existing=context.get('existing_project')
+        if supplied_project is not None:
+            p=supplied_project
+            r={'version':3,'project':p,'plan':{'project_name':p.name,'test_commands':[]},'validation':self.validate(p)}
+        elif existing:
+            root=Path(existing).expanduser().resolve()
+            if not root.is_dir(): raise ValueError('Existing project not found: '+str(root))
+            project=self.pm.create(root.name)
+            if project.root.resolve() != root:
+                for src in root.rglob('*'):
+                    if src.is_file() and '.git' not in src.parts and 'node_modules' not in src.parts and '__pycache__' not in src.parts:
+                        dst=project.root/src.relative_to(root); dst.parent.mkdir(parents=True,exist_ok=True); shutil.copy2(src,dst)
+            commands=[]
+            snap=self.pm.snapshot(project)
+            if 'package.json' in snap:
+                try:
+                    if json.loads(snap['package.json']).get('scripts',{}).get('test'): commands=['npm test -- --runInBand']
+                except Exception: pass
+            r={'version':3,'project':project,'plan':{'project_name':project.name,'test_commands':commands},'validation':self.validate(project)}
+        else:
+            r=super().run(request,context)
+        p=r['project']; commands=r['plan'].get('test_commands',[])
         timeout=getattr(self.config,'command_timeout',60) if self.config else 60
         limit=getattr(self.config,'max_debug_iterations',3) if self.config else 3
         results=self.tests.run(p,commands,timeout) if commands else []; history=[]
@@ -99,9 +122,10 @@ class V6ExistingProjectDeveloper(V5DeploymentAgent):
         root=Path(existing).expanduser().resolve()
         if not root.is_dir(): raise ValueError('Existing project not found: '+str(root))
         project=self.pm.create(root.name)
-        for src in root.rglob('*'):
-            if src.is_file() and '.git' not in src.parts and 'node_modules' not in src.parts and '__pycache__' not in src.parts:
-                dst=project.root/src.relative_to(root); dst.parent.mkdir(parents=True,exist_ok=True); shutil.copy2(src,dst)
+        if project.root.resolve() != root:
+            for src in root.rglob('*'):
+                if src.is_file() and '.git' not in src.parts and 'node_modules' not in src.parts and '__pycache__' not in src.parts:
+                    dst=project.root/src.relative_to(root); dst.parent.mkdir(parents=True,exist_ok=True); shutil.copy2(src,dst)
         before=self.pm.snapshot(project); changed=False; explanation=''
         if self.planner.provider.client:
             prompt='Modify this project for the user request. Return ONLY JSON with files and explanation. Files must contain complete replacement contents.\nREQUEST:\n'+request+'\nPROJECT:\n'+json.dumps(before)
