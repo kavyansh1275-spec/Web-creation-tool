@@ -20,3 +20,19 @@ Set `GEMINI_API_KEY` to enable AI generation. Without a key, deterministic offli
 Run `python -m pytest -q`. GitHub Actions also runs the test suite on pushes and pull requests.
 
 The repository is independent and does not depend on AI-Workflow-Orchestrator.
+
+
+## Real standalone deployment
+
+Generated websites no longer use a fake `?preview=` link as their public URL. The deployment layer publishes generated files into a dedicated `generated-sites/<project>` directory in the repository and creates an independent Render service.
+
+For automatic deployment from the hosted Streamlit app, configure these environment variables on the Web Creation Tool service:
+
+- `GITHUB_TOKEN` — GitHub token with Contents write access to this repository.
+- `RENDER_API_KEY` — Render API key.
+- `RENDER_OWNER_ID` — the Render workspace/owner ID.
+- Optional: `GITHUB_REPOSITORY`, `GITHUB_BRANCH`, `DEPLOYMENT_BASE_PATH`.
+
+Static HTML/CSS/JS projects are deployed as Render Static Sites and receive their own `onrender.com` URL. Projects containing server-side code are routed toward a Render Web Service configuration.
+
+The Web Creation Tool only reports a live URL when the external deployment actually succeeds. Otherwise it clearly reports that the project was generated but not publicly deployed.
