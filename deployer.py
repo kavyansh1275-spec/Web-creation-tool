@@ -150,10 +150,16 @@ class GitHubRenderDeployer:
                 raise DeploymentError("Node project has no package.json start script; deployment stopped.")
             return {"kind":"node","runtime":"node","build_command":"npm install","start_command":"npm start"}
         if "requirements.txt" in files or "pyproject.toml" in files:
+            if (self.project/"requirements.txt").exists():
+                build="pip install -r requirements.txt"
+            elif (self.project/"pyproject.toml").exists():
+                build="pip install ."
+            else:
+                build="pip install ."
             if (self.project/"app.py").exists():
-                return {"kind":"python","runtime":"python","build_command":"pip install -r requirements.txt","start_command":"python app.py"}
+                return {"kind":"python","runtime":"python","build_command":build,"start_command":"python app.py"}
             if (self.project/"main.py").exists():
-                return {"kind":"python","runtime":"python","build_command":"pip install -r requirements.txt","start_command":"python main.py"}
+                return {"kind":"python","runtime":"python","build_command":build,"start_command":"python main.py"}
             raise DeploymentError("Python dependencies detected but no supported app.py/main.py entrypoint was found.")
         raise DeploymentError("Unsupported project stack. Deployment stopped instead of guessing a runtime.")
 
