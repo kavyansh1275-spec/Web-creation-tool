@@ -93,7 +93,7 @@ class V4VisualQA(V3AutonomousDebugger):
         for f,t in snap.items():
             if f.endswith('.html'):
                 low=t.lower(); checks += [(f+':doctype','<!doctype' in low),(f+':title','<title' in low),(f+':viewport','viewport' in low)]
-        browser={'available':False,'passed':True,'reason':'Playwright unavailable; browser checks skipped'}
+        browser={'available':False,'passed':False,'reason':'Playwright is unavailable; browser QA cannot be considered passed.'}
         server=None; old=os.getcwd()
         try:
             from playwright.sync_api import sync_playwright
@@ -123,6 +123,16 @@ class V5DeploymentAgent(V4VisualQA):
         with zipfile.ZipFile(artifact,'w',zipfile.ZIP_DEFLATED) as z:
             for f in p.root.rglob('*'):
                 if f.is_file() and f.name!='qa-screenshot.png': z.write(f,f.relative_to(p.root))
+        qa_passed=bool(r.get('visual_qa',{}).get('passed'))
+        test_results=r.get('test_results',[])
+        tests_passed=bool(test_results) and all(item.get('passed') for item in r.get('test_results',[]))
+        if not qa_passed or not tests_passed:
+            artifact_ready=artifact.exists()
+            r['deployment']={'artifact':str(artifact.resolve()),'artifact_ready':artifact_ready,
+                'external':{'provider':'none','success':False,'reason':'Deployment blocked by failed or incomplete quality gates.'},
+                'real':{'provider':'render','success':False,'reason':'Deployment blocked by failed or incomplete quality gates.'}}
+            r['version']=5
+            return r
         deploy={'provider':'none','success':False,'reason':'No deployment credentials configured'}
         if os.getenv('VERCEL_TOKEN') and shutil.which('vercel'):
             proc=subprocess.run(['vercel','--yes','--token',os.getenv('VERCEL_TOKEN')],cwd=p.root,text=True,capture_output=True,timeout=180); out=(proc.stdout or '')+(proc.stderr or '')
@@ -163,8 +173,10 @@ class V6ExistingProjectDeveloper(V5DeploymentAgent):
             except Exception: pass
         results=self.tests.run(project,commands) if commands else []
         result={'version':6,'project':project,'plan':{'project_name':project.name,'test_commands':commands},'existing_project_mode':True,'change_applied':changed,'change_explanation':explanation,'test_results':self.serial_results(results),'validation':self.validate(project)}
-        if changed:
+        if changed and results and all(x.passed for x in results):
             result['deployment']=GitHubRenderDeployer(project,self.config).deploy()
+        elif changed:
+            result['deployment']={'success':False,'provider':'render','reason':'Deployment was blocked because the modified project did not pass its automated tests.'}
         else:
             result['deployment']={'success':False,'provider':'render','reason':'No verified project modification was applied; deployment was intentionally skipped.'}
         return result
