@@ -1,5 +1,5 @@
 from pathlib import Path
-import json, re, shutil, zipfile, os, subprocess
+import json, re, shutil, zipfile, os, subprocess, threading, http.server
 from core import Planner, RepairEngine
 
 class BaseVersion:
@@ -8,6 +8,9 @@ class BaseVersion:
         plan=self.planner.plan(request); project=self.pm.create(name or plan.get('project_name','generated-web-app')); self.pm.write_files(project,plan.get('files',{})); return project,plan
     def validate(self,project):
         snap=self.pm.snapshot(project); return {'files':len(snap),'has_html':any(p.endswith('.html') for p in snap)}
+    @staticmethod
+    def serial_results(results):
+        return [{'name':x.name,'passed':x.passed,'output':x.output[-12000:],'duration':x.duration} for x in results]
 
 class V1WebsiteGenerator(BaseVersion):
     number=1; name='Website Generator'
@@ -27,23 +30,19 @@ class V2FullStackDeveloper(V1WebsiteGenerator):
 class V3AutonomousDebugger(V2FullStackDeveloper):
     number=3; name='Autonomous Debugging'
     def run(self,request,context=None):
-        r=super().run(request,context); p=r['project']
-        commands=r['plan'].get('test_commands',[])
+        r=super().run(request,context); p=r['project']; commands=r['plan'].get('test_commands',[])
         timeout=getattr(self.config,'command_timeout',60) if self.config else 60
         limit=getattr(self.config,'max_debug_iterations',3) if self.config else 3
-        results=self.tests.run(p,commands,timeout) if commands else []
-        history=[]
+        results=self.tests.run(p,commands,timeout) if commands else []; history=[]
         repairer=RepairEngine(self.planner.provider,self.pm,limit)
         for i in range(limit):
             failed=[x for x in results if not x.passed]
             if not failed: break
-            repair=repairer.repair(p,[{'command':x.name,'output':x.output[-12000:]} for x in failed])
-            repair['iteration']=i+1; history.append(repair)
+            repair=repairer.repair(p,[{'command':x.name,'output':x.output[-12000:]} for x in failed]); repair['iteration']=i+1; history.append(repair)
             if not repair.get('changed_files'): break
             results=self.tests.run(p,commands,timeout)
-        r['test_results']=self.serial_results(results)
-        r['debug_summary']={**self.tests.summary(results),'iterations':len(history),'repair_history':history}
-        r['version']=3; return r
+        r['test_results']=self.serial_results(results); r['debug_summary']={**self.tests.summary(results),'iterations':len(history),'repair_history':history}; r['version']=3; return r
+
 class V4VisualQA(V3AutonomousDebugger):
     number=4; name='Browser / Visual QA'
     def run(self,request,context=None):
@@ -51,50 +50,46 @@ class V4VisualQA(V3AutonomousDebugger):
         checks=[]
         for f,t in snap.items():
             if f.endswith('.html'):
-                low=t.lower()
-                checks += [(f+':doctype','<!doctype' in low),(f+':title','<title' in low),(f+':viewport','viewport' in low)]
-        browser={'available':False,'passed':True,'reason':'Playwright optional'}
+                low=t.lower(); checks += [(f+':doctype','<!doctype' in low),(f+':title','<title' in low),(f+':viewport','viewport' in low)]
+        browser={'available':False,'passed':True,'reason':'Playwright unavailable; browser checks skipped'}
+        server=None; old=os.getcwd()
         try:
             from playwright.sync_api import sync_playwright
-            import threading, http.server, os
             class Handler(http.server.SimpleHTTPRequestHandler):
                 def log_message(self,*args): pass
-            old=os.getcwd(); os.chdir(p.root)
-            server=http.server.ThreadingHTTPServer(('127.0.0.1',0),Handler)
+            os.chdir(p.root); server=http.server.ThreadingHTTPServer(('127.0.0.1',0),Handler)
             threading.Thread(target=server.serve_forever,daemon=True).start()
             errors=[]
             with sync_playwright() as pw:
-                browser_obj=pw.chromium.launch(headless=True)
-                page=browser_obj.new_page(viewport={'width':1280,'height':800})
+                browser_obj=pw.chromium.launch(headless=True); page=browser_obj.new_page(viewport={'width':1280,'height':800})
                 page.on('pageerror',lambda e: errors.append(str(e)))
                 response=page.goto('http://127.0.0.1:'+str(server.server_port)+'/index.html',wait_until='networkidle',timeout=15000)
-                screenshot=p.root/'qa-screenshot.png'; page.screenshot(path=str(screenshot),full_page=True)
-                browser_obj.close()
-            server.shutdown(); server.server_close(); os.chdir(old)
+                screenshot=p.root/'qa-screenshot.png'; page.screenshot(path=str(screenshot),full_page=True); browser_obj.close()
             browser={'available':True,'passed':bool(response and response.ok and not errors),'status':response.status if response else None,'errors':errors,'screenshot':str(screenshot)}
         except Exception as e:
             browser={'available':True,'passed':False,'reason':str(e)}
-        r['visual_qa']={'static_checks':checks,'browser':browser,'passed':all(x[1] for x in checks) and browser['passed']}
-        r['version']=4; return r
+        finally:
+            if server:
+                server.shutdown(); server.server_close()
+            os.chdir(old)
+        r['visual_qa']={'static_checks':checks,'browser':browser,'passed':all(x[1] for x in checks) and browser['passed']}; r['version']=4; return r
+
 class V5DeploymentAgent(V4VisualQA):
     number=5; name='Deployment Agent'
     def run(self,request,context=None):
-        r=super().run(request,context); p=r['project']
-        artifact=p.root.parent/(p.root.name+'.zip')
+        r=super().run(request,context); p=r['project']; artifact=p.root.parent/(p.root.name+'.zip')
         with zipfile.ZipFile(artifact,'w',zipfile.ZIP_DEFLATED) as z:
             for f in p.root.rglob('*'):
                 if f.is_file() and f.name!='qa-screenshot.png': z.write(f,f.relative_to(p.root))
         deploy={'provider':'none','success':False,'reason':'No deployment credentials configured'}
         if os.getenv('VERCEL_TOKEN') and shutil.which('vercel'):
-            proc=subprocess.run(['vercel','--yes','--token',os.getenv('VERCEL_TOKEN')],cwd=p.root,text=True,capture_output=True,timeout=180)
-            out=(proc.stdout or '')+(proc.stderr or '')
+            proc=subprocess.run(['vercel','--yes','--token',os.getenv('VERCEL_TOKEN')],cwd=p.root,text=True,capture_output=True,timeout=180); out=(proc.stdout or '')+(proc.stderr or '')
             deploy={'provider':'vercel','success':proc.returncode==0,'output':out[-12000:]}
         elif os.getenv('NETLIFY_AUTH_TOKEN') and shutil.which('netlify'):
-            proc=subprocess.run(['netlify','deploy','--prod','--dir','.'],cwd=p.root,text=True,capture_output=True,timeout=180,env={**os.environ,'NETLIFY_AUTH_TOKEN':os.getenv('NETLIFY_AUTH_TOKEN')})
-            out=(proc.stdout or '')+(proc.stderr or '')
+            proc=subprocess.run(['netlify','deploy','--prod','--dir','.'],cwd=p.root,text=True,capture_output=True,timeout=180,env={**os.environ,'NETLIFY_AUTH_TOKEN':os.getenv('NETLIFY_AUTH_TOKEN')}); out=(proc.stdout or '')+(proc.stderr or '')
             deploy={'provider':'netlify','success':proc.returncode==0,'output':out[-12000:]}
-        r['deployment']={'artifact':str(artifact.resolve()),'artifact_ready':artifact.exists(),'external':deploy}
-        r['version']=5; return r
+        r['deployment']={'artifact':str(artifact.resolve()),'artifact_ready':artifact.exists(),'external':deploy}; r['version']=5; return r
+
 class V6ExistingProjectDeveloper(V5DeploymentAgent):
     number=6; name='Existing Project Developer'
     def run(self,request,context=None):
@@ -110,25 +105,25 @@ class V6ExistingProjectDeveloper(V5DeploymentAgent):
         before=self.pm.snapshot(project); changed=False; explanation=''
         if self.planner.provider.client:
             prompt='Modify this project for the user request. Return ONLY JSON with files and explanation. Files must contain complete replacement contents.\nREQUEST:\n'+request+'\nPROJECT:\n'+json.dumps(before)
-            raw=self.planner.provider.generate(prompt)
             try:
-                patch=self.planner.provider.extract_json(raw); files=patch.get('files',{})
-                self.pm.write_files(project,files); changed=bool(files); explanation=patch.get('explanation','')
+                patch=self.planner.provider.extract_json(self.planner.provider.generate(prompt)); files=patch.get('files',{})
+                if isinstance(files,dict): self.pm.write_files(project,files); changed=bool(files)
+                explanation=patch.get('explanation','')
             except Exception as e: explanation='AI change failed: '+str(e)
-        snap=self.pm.snapshot(project)
-        commands=[]
+        snap=self.pm.snapshot(project); commands=[]
         if 'package.json' in snap:
             try:
-                pkg=json.loads(snap['package.json']);
-                if pkg.get('scripts',{}).get('test'): commands=['npm test -- --runInBand']
+                if json.loads(snap['package.json']).get('scripts',{}).get('test'): commands=['npm test -- --runInBand']
             except Exception: pass
         results=self.tests.run(project,commands) if commands else []
-        r={'version':6,'project':project,'plan':{'project_name':project.name,'test_commands':commands},'existing_project_mode':True,'change_applied':changed,'change_explanation':explanation,'test_results':self.serial_results(results),'validation':self.validate(project)}
-        return r
+        return {'version':6,'project':project,'plan':{'project_name':project.name,'test_commands':commands},'existing_project_mode':True,'change_applied':changed,'change_explanation':explanation,'test_results':self.serial_results(results),'validation':self.validate(project)}
+
 class V7AutonomousAIProductEngineer(V6ExistingProjectDeveloper):
     number=7; name='Autonomous AI Product Engineer'
     def run(self,request,context=None):
-        r=super().run(request,context); p=r['project']; r['engineering_report']={'phases':['understand','plan','build','test','debug','browser-qa','deploy/package'],'project_files':len(self.pm.snapshot(p)),'tests':r.get('debug_summary',r.get('test_results')),'visual_qa':r.get('visual_qa'),'deployment':r.get('deployment'),'status':'completed_with_report'}; r['version']=7; return r
+        r=super().run(request,context); p=r['project']
+        r['engineering_report']={'phases':['understand','plan','build','test','debug','browser-qa','deploy/package'],'project_files':len(self.pm.snapshot(p)),'tests':r.get('debug_summary',r.get('test_results')),'visual_qa':r.get('visual_qa'),'deployment':r.get('deployment'),'status':'completed_with_report'}
+        r['version']=7; return r
 
 def build_pipeline(pm,provider,tests,config=None):
     planner=Planner(provider)
