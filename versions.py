@@ -181,12 +181,24 @@ class V6ExistingProjectDeveloper(V5DeploymentAgent):
             result['deployment']={'success':False,'provider':'render','reason':'No verified project modification was applied; deployment was intentionally skipped.'}
         return result
 
-class V7AutonomousAIProductEngineer(V6ExistingProjectDeveloper):
+class V7AutonomousAIProductEngineer(BaseVersion):
     number=7; name='Autonomous AI Product Engineer'
     def run(self,request,context=None):
-        r=super().run(request,context); p=r['project']
-        r['engineering_report']={'phases':['understand','plan','build','test','debug','browser-qa','deploy/package'],'project_files':len(self.pm.snapshot(p)),'tests':r.get('debug_summary',r.get('test_results')),'visual_qa':r.get('visual_qa'),'deployment':r.get('deployment'),'status':'completed_with_report'}
-        r['version']=7; return r
+        p,plan=self.build(request)
+        v3=V3AutonomousDebugger(self.pm,self.planner,self.tests,self.config).run(request,{'project':p})
+        v4=V4VisualQA(self.pm,self.planner,self.tests,self.config).run(request,{'project':p})
+        results=v4.get('test_results',[])
+        tests_passed=bool(results) and all(x.get('passed') for x in results)
+        qa_passed=bool(v4.get('visual_qa',{}).get('passed'))
+        gate=tests_passed and qa_passed and not plan.get('offline')
+        deployment=GitHubRenderDeployer(p,self.config).deploy() if gate else {'success':False,'provider':'render','reason':'Deployment blocked by final quality gates.'}
+        return {'version':7,'project':p,'plan':plan,'validation':self.validate(p),'debug':v3,
+                'visual_qa':v4.get('visual_qa'),'test_results':results,
+                'quality_gate':{'passed':gate,'tests_passed':tests_passed,'browser_qa_passed':qa_passed},
+                'deployment':deployment,
+                'engineering_report':{'phases':['understand','plan','build','debug','test','browser-qa','final-gate','deploy'],
+                                      'project_files':len(self.pm.snapshot(p)),
+                                      'status':'completed' if deployment.get('success') else 'blocked_by_quality_gate'}}
 
 def build_pipeline(pm,provider,tests,config=None):
     planner=Planner(provider)
