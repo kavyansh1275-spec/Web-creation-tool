@@ -40,50 +40,69 @@ class V2FullStackDeveloper(V1WebsiteGenerator):
 
 class V3AutonomousDebugger(V2FullStackDeveloper):
     number=3; name='Autonomous Debugging'
+    def _copy_existing(self, existing):
+        root=Path(existing).expanduser().resolve()
+        if not root.is_dir(): raise ValueError('Existing project not found: '+str(root))
+        project=self.pm.create(root.name)
+        if project.root.resolve() != root:
+            for src in root.rglob('*'):
+                if src.is_file() and '.git' not in src.parts and 'node_modules' not in src.parts and '__pycache__' not in src.parts:
+                    dst=project.root/src.relative_to(root); dst.parent.mkdir(parents=True,exist_ok=True); shutil.copy2(src,dst)
+        return project
+
+    def _restore(self, project, snapshot):
+        current=self.pm.snapshot(project)
+        for rel in current:
+            if rel not in snapshot and not str(current[rel]).startswith('<binary file:'):
+                (project.root/rel).unlink(missing_ok=True)
+        self.pm.write_files(project,{k:v for k,v in snapshot.items() if not str(v).startswith('<binary file:')})
+
     def run(self,request,context=None):
         context=context or {}
-        supplied_project=context.get('project')
-        existing=context.get('existing_project')
+        supplied_project=context.get('project'); existing=context.get('existing_project')
         if supplied_project is not None:
-            p=supplied_project
-            r={'version':3,'project':p,'plan':{'project_name':p.name,'test_commands':[]},'validation':self.validate(p)}
+            p=supplied_project; plan={'project_name':p.name,'test_commands':[]}
         elif existing:
-            root=Path(existing).expanduser().resolve()
-            if not root.is_dir(): raise ValueError('Existing project not found: '+str(root))
-            project=self.pm.create(root.name)
-            if project.root.resolve() != root:
-                for src in root.rglob('*'):
-                    if src.is_file() and '.git' not in src.parts and 'node_modules' not in src.parts and '__pycache__' not in src.parts:
-                        dst=project.root/src.relative_to(root); dst.parent.mkdir(parents=True,exist_ok=True); shutil.copy2(src,dst)
-            commands=[]
-            snap=self.pm.snapshot(project)
+            p=self._copy_existing(existing); plan={'project_name':p.name,'test_commands':[]}
+        else:
+            p,plan=self.build(request)
+        commands=list(plan.get('test_commands',[]) or [])
+        if not commands:
+            snap=self.pm.snapshot(p)
             if 'package.json' in snap:
                 try:
                     if json.loads(snap['package.json']).get('scripts',{}).get('test'): commands=['npm test -- --runInBand']
                 except Exception: pass
-            r={'version':3,'project':project,'plan':{'project_name':project.name,'test_commands':commands},'validation':self.validate(project)}
-        else:
-            project,plan=self.build(request)
-            r={'version':3,'project':project,'plan':plan,'validation':self.validate(project)}
-            if plan.get('offline'):
-                r['offline']=True
-        p=r['project']; commands=r['plan'].get('test_commands',[])
+            elif 'pytest.ini' in snap or 'pyproject.toml' in snap or any(x.startswith('tests/') for x in snap):
+                commands=['pytest -q']
         timeout=getattr(self.config,'command_timeout',60) if self.config else 60
-        limit=getattr(self.config,'max_debug_iterations',3) if self.config else 3
-        results=self.tests.run(p,commands,timeout) if commands else []; history=[]
+        limit=max(1,getattr(self.config,'max_debug_iterations',3) if self.config else 3)
+        results=self.tests.run(p,commands,timeout) if commands else []
+        history=[]; accepted=bool(results) and all(x.passed for x in results)
         repairer=RepairEngine(self.planner.provider,self.pm,limit)
-        if not results and (supplied_project is not None or existing) and self.planner.provider.client:
-            repair=repairer.repair(p,[{'command':'manual-debug-request','output':request+'\nPROJECT:\n'+json.dumps(self.pm.snapshot(p))}])
-            repair['iteration']=1; history.append(repair)
-            if repair.get('changed_files'):
-                results=self.tests.run(p,commands,timeout) if commands else []
-        for i in range(limit):
+        for iteration in range(1,limit+1):
             failed=[x for x in results if not x.passed]
-            if not failed: break
-            repair=repairer.repair(p,[{'command':x.name,'output':x.output[-12000:]} for x in failed]); repair['iteration']=i+1; history.append(repair)
-            if not repair.get('changed_files'): break
-            results=self.tests.run(p,commands,timeout)
-        r['test_results']=self.serial_results(results); r['debug_summary']={**self.tests.summary(results),'iterations':len(history),'repair_history':history}; r['quality_gate']={'passed': (not results) or all(x.passed for x in results), 'tests_defined': bool(commands), 'tests_executed': bool(results), 'tests_passed': bool(results) and all(x.passed for x in results)}; r['version']=3; return r
+            if not failed and not (not commands and self.planner.provider.client and (supplied_project is not None or existing)):
+                break
+            before=self.pm.snapshot(p)
+            evidence=[{'command':x.name,'output':x.output[-12000:]} for x in failed] or [{'command':'manual-debug-request','output':request+'\nPROJECT:\n'+json.dumps(before)}]
+            repair=repairer.repair(p,evidence); repair['iteration']=iteration
+            if not repair.get('changed_files'):
+                history.append(repair); break
+            trial=self.tests.run(p,commands,timeout) if commands else []
+            trial_ok=bool(trial) and all(x.passed for x in trial)
+            if trial_ok:
+                results=trial; accepted=True; history.append({**repair,'accepted':True}); break
+            self._restore(p,before)
+            history.append({**repair,'accepted':False,'rollback':True})
+            results=trial
+        r={'version':3,'project':p,'plan':{**plan,'test_commands':commands},'validation':self.validate(p),
+           'test_results':self.serial_results(results),
+           'debug_summary':{**self.tests.summary(results),'iterations':len(history),'repair_history':history},
+           'quality_gate':{'passed':accepted,'tests_defined':bool(commands),'tests_executed':bool(results),
+                           'tests_passed':bool(results) and all(x.passed for x in results)}}
+        if plan.get('offline'): r['offline']=True
+        return r
 
 class V4VisualQA(V3AutonomousDebugger):
     number=4; name='Browser / Visual QA'
