@@ -35,11 +35,7 @@ class ProjectManager:
             if not isinstance(content,str): raise ValueError('File content must be text: '+rel)
             path.parent.mkdir(parents=True,exist_ok=True)
             path.write_text(content,encoding='utf-8'); project.files[rel]=content
-    def snapshot(self,project):
-        out={}
-        for p in project.root.rglob('*'):
-            if p.is_file() and '.git' not in p.parts: out[str(p.relative_to(project.root))]=p.read_text(encoding='utf-8',errors='replace')
-        return out
+    def snapshot(self,project):\n        out={}\n        for p in project.root.rglob('*'):\n            if not p.is_file() or '.git' in p.parts:\n                continue\n            rel=str(p.relative_to(project.root))\n            try:\n                out[rel]=p.read_text(encoding='utf-8')\n            except UnicodeDecodeError:\n                out[rel]=f'<binary file: {p.stat().st_size} bytes>'\n        return out
 
 class CommandRunner:
     def run(self,command,cwd,timeout=60):
