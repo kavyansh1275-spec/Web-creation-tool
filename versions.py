@@ -129,7 +129,7 @@ class V5DeploymentAgent(V4VisualQA):
         elif os.getenv('NETLIFY_AUTH_TOKEN') and shutil.which('netlify'):
             proc=subprocess.run(['netlify','deploy','--prod','--dir','.'],cwd=p.root,text=True,capture_output=True,timeout=180,env={**os.environ,'NETLIFY_AUTH_TOKEN':os.getenv('NETLIFY_AUTH_TOKEN')}); out=(proc.stdout or '')+(proc.stderr or '')
             deploy={'provider':'netlify','success':proc.returncode==0,'output':out[-12000:]}
-        real=GitHubRenderDeployer(p,self.config).deploy()
+        real={'success':False,'provider':'render','reason':'Deployment skipped because the project was generated in offline mode.'} if r.get('offline') else GitHubRenderDeployer(p,self.config).deploy()
         if real.get('success'):
             deploy={'provider':'render','success':True,'url':real.get('url'),'service_id':real.get('service_id'),'output':real.get('url','')}
         r['deployment']={'artifact':str(artifact.resolve()),'artifact_ready':artifact.exists(),'external':deploy,'real':real}; r['version']=5; return r
