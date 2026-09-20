@@ -136,49 +136,46 @@ class GitHubRenderDeployer:
             self._commit_file(path, content, f"Deploy generated project: {self.project.name}")
         return len(files)
 
-    def _render_service(self, service_name, target, kind):
+    def _detect_stack(self):
+        files={p.name for p in self.project.rglob('*') if p.is_file()}
+        if "index.html" in files and "package.json" not in files:
+            return {"kind":"static","runtime":None,"build_command":"echo 'No build step required'","start_command":None}
+        if "package.json" in files:
+            try:
+                data=json.loads((self.project/"package.json").read_text(encoding="utf-8"))
+                scripts=data.get("scripts",{})
+            except Exception as exc:
+                raise DeploymentError("Invalid package.json: "+str(exc))
+            if not scripts.get("start"):
+                raise DeploymentError("Node project has no package.json start script; deployment stopped.")
+            return {"kind":"node","runtime":"node","build_command":"npm install","start_command":"npm start"}
+        if "requirements.txt" in files or "pyproject.toml" in files:
+            if (self.project/"app.py").exists():
+                return {"kind":"python","runtime":"python","build_command":"pip install -r requirements.txt","start_command":"python app.py"}
+            if (self.project/"main.py").exists():
+                return {"kind":"python","runtime":"python","build_command":"pip install -r requirements.txt","start_command":"python main.py"}
+            raise DeploymentError("Python dependencies detected but no supported app.py/main.py entrypoint was found.")
+        raise DeploymentError("Unsupported project stack. Deployment stopped instead of guessing a runtime.")
+
+    def _render_service(self, service_name, target, stack):
         repo_url = f"https://github.com/{self.repository}"
-        if kind == "static":
-            details = {
-                "buildCommand": "echo 'No build step required'",
-                "publishPath": ".",
-            }
+        if stack["kind"] == "static":
             payload = {
-                "type": "static_site",
-                "name": service_name,
-                "ownerId": self.owner_id,
-                "repo": repo_url,
-                "branch": self.branch,
-                "autoDeploy": "yes",
-                "rootDir": target,
-                "serviceDetails": details,
+                "type":"static_site","name":service_name,"ownerId":self.owner_id,
+                "repo":repo_url,"branch":self.branch,"autoDeploy":"yes","rootDir":target,
+                "serviceDetails":{"buildCommand":stack["build_command"],"publishPath":"."}
             }
         else:
-            details = {
-                "runtime": "node",
-                "plan": "free",
-                "region": "virginia",
-                "buildCommand": "npm install",
-                "startCommand": "npm start",
-            }
             payload = {
-                "type": "web_service",
-                "name": service_name,
-                "ownerId": self.owner_id,
-                "repo": repo_url,
-                "branch": self.branch,
-                "autoDeploy": "yes",
-                "rootDir": target,
-                "serviceDetails": details,
+                "type":"web_service","name":service_name,"ownerId":self.owner_id,
+                "repo":repo_url,"branch":self.branch,"autoDeploy":"yes","rootDir":target,
+                "serviceDetails":{"runtime":stack["runtime"],"plan":"free","region":"virginia",
+                                  "buildCommand":stack["build_command"],"startCommand":stack["start_command"]}
             }
         _, data = self._render("/services", method="POST", payload=payload)
         service = data.get("service", data)
-        return {
-            "service_id": service.get("id"),
-            "service_name": service.get("name", service_name),
-            "url": service.get("url"),
-            "slug": service.get("slug"),
-        }
+        return {"service_id":service.get("id"),"service_name":service.get("name",service_name),
+                "url":service.get("url"),"slug":service.get("slug")}
 
     def deploy(self):
         if not self.configured:
@@ -193,17 +190,19 @@ class GitHubRenderDeployer:
             }
 
         target = f"{self.base_path}/{self.slug(self.project.name)}"
-        kind = "static" if (self.project / "index.html").exists() else "web"
-        identity = hashlib.sha256(str(self.project).encode("utf-8")).hexdigest()[:8]
+        stack = self._detect_stack()
+        kind = stack["kind"]
+        identity = hashlib.sha256((str(self.project)+"|"+kind).encode("utf-8")).hexdigest()[:8]
         service_name = self.slug(self.project.name) + "-" + identity
         target = target + "-" + identity
         try:
             file_count = self._push_project(target)
-            service = self._render_service(service_name, target, kind)
+            service = self._render_service(service_name, target, stack)
             result = {
                 "success": True,
                 "provider": "render",
                 "kind": kind,
+                "runtime": stack.get("runtime"),
                 "repository": f"https://github.com/{self.repository}",
                 "branch": self.branch,
                 "root_dir": target,
