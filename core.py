@@ -48,7 +48,24 @@ class CommandRunner:
 
 class TestRunner:
     def __init__(self,runner=None): self.runner=runner or CommandRunner()
-    def run(self,project,commands,timeout=60): return [self.runner.run(c,project.root,timeout) for c in commands]
+    @staticmethod
+    def safe_command(command):
+        command=str(command).strip()
+        if not command or len(command)>300:
+            return False
+        forbidden=['&&','||',';','|','>','<','`','$(']
+        if any(token in command for token in forbidden) or '\n' in command or '\r' in command:
+            return False
+        allowed=re.match(r'^(python(?:\s+-m\s+[A-Za-z0-9_.-]+(?:\s+.*)?)?|pytest(?:\s+.*)?|npm\s+(?:test|run\s+[A-Za-z0-9:_-]+)(?:\s+.*)?|node\s+[A-Za-z0-9_./-]+(?:\s+.*)?)$',command,re.I)
+        return bool(allowed)
+    def run(self,project,commands,timeout=60):
+        results=[]
+        for command in commands:
+            if not self.safe_command(command):
+                results.append(TestResult(str(command),False,'Rejected unsafe or unsupported test command.',0.0))
+            else:
+                results.append(self.runner.run(command,project.root,timeout))
+        return results
     def summary(self,results): return {'total':len(results),'passed':sum(r.passed for r in results),'failed':sum(not r.passed for r in results)}
 
 class AIProvider:
