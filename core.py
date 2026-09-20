@@ -1,6 +1,6 @@
 from dataclasses import dataclass, field
 from pathlib import Path
-import json, re, subprocess, time
+import json, re, subprocess, time, os
 
 @dataclass
 class Project:
@@ -87,7 +87,25 @@ class AIProvider:
 class Planner:
     SYSTEM='''You are the production engineering planner for a serious software-generation system.\nReturn ONLY valid JSON with project_name, files, test_commands, stack, summary.\nImplement the user's request completely, not as a toy scaffold.\nEvery requested major feature must have working code and relevant configuration.\nGenerate complete files, never pseudocode, TODO placeholders, ellipses, fake URLs, or claims of completed deployment.\nInclude automated tests for important business logic and major flows when the chosen stack supports them.\nUse environment variables for secrets and deterministic offline/demo behavior for AI features.\nNever invent real financial/business results; label estimates and assumptions.\nAll file paths must be relative and safe.'''
     def __init__(self,provider): self.provider=provider
-    def plan(self,request):\n        if not self.provider.client:\n            return {\n                'project_name':'offline-generation',\n                'files':{\n                    'index.html': "<!doctype html><html lang='en'><head><meta charset='utf-8'><meta name='viewport' content='width=device-width,initial-scale=1'><title>Offline Generation Mode</title><link rel='stylesheet' href='styles.css'></head><body><main><h1>Offline generation mode</h1><p>The AI provider is not configured. A production build was not falsely claimed.</p><p>Configure GEMINI_API_KEY and run the request again.</p></main></body></html>",\n                    'styles.css': "body{font-family:system-ui,sans-serif;margin:0;padding:3rem;line-height:1.5}main{max-width:760px;margin:auto}"\n                },\n                'test_commands':[],\n                'offline':True,\n                'summary':'AI provider unavailable; production generation not completed.'\n            }\n        raw=self.provider.generate(self.SYSTEM+'\\nUser request:\\n'+request)\n        if not raw: raise RuntimeError('AI provider returned no content')\n        plan=self.provider.extract_json(raw)\n        if not isinstance(plan,dict) or not isinstance(plan.get('files'),dict):\n            raise ValueError('AI returned an invalid project plan')\n        return plan
+    def plan(self,request):
+        if not self.provider.client:
+            return {
+                'project_name': 'offline-generation',
+                'files': {
+                    'index.html': "<!doctype html><html lang='en'><head><meta charset='utf-8'><meta name='viewport' content='width=device-width,initial-scale=1'><title>Offline Generation Mode</title><link rel='stylesheet' href='styles.css'></head><body><main><h1>Offline generation mode</h1><p>The AI provider is not configured. A production build was not falsely claimed.</p><p>Configure GEMINI_API_KEY and run the request again.</p></main></body></html>",
+                    'styles.css': "body{font-family:system-ui,sans-serif;margin:0;padding:3rem;line-height:1.5}main{max-width:760px;margin:auto}"
+                },
+                'test_commands': [],
+                'offline': True,
+                'summary': 'AI provider unavailable; production generation not completed.'
+            }
+        raw=self.provider.generate(self.SYSTEM+'\nUser request:\n'+request)
+        if not raw:
+            raise RuntimeError('AI provider returned no content')
+        plan=self.provider.extract_json(raw)
+        if not isinstance(plan,dict) or not isinstance(plan.get('files'),dict):
+            raise ValueError('AI returned an invalid project plan')
+        return plan
 
 
 class RepairEngine:
