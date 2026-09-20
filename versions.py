@@ -120,13 +120,20 @@ class V4VisualQA(V3AutonomousDebugger):
                 def log_message(self,*args): pass
             os.chdir(p.root); server=http.server.ThreadingHTTPServer(('127.0.0.1',0),Handler)
             threading.Thread(target=server.serve_forever,daemon=True).start()
-            errors=[]
+            errors=[]; failed_requests=[]
             with sync_playwright() as pw:
-                browser_obj=pw.chromium.launch(headless=True); page=browser_obj.new_page(viewport={'width':1280,'height':800})
-                page.on('pageerror',lambda e: errors.append(str(e)))
+                browser_obj=pw.chromium.launch(headless=True)
+                page=browser_obj.new_page(viewport={'width':1280,'height':800})
+                page.on('pageerror',lambda e: errors.append('pageerror: '+str(e)))
+                page.on('console',lambda msg: errors.append('console '+msg.type+': '+msg.text) if msg.type == 'error' else None)
+                page.on('requestfailed',lambda req: failed_requests.append(str(req.url)+' — '+str(req.failure)))
                 response=page.goto('http://127.0.0.1:'+str(server.server_port)+'/index.html',wait_until='networkidle',timeout=15000)
-                screenshot=p.root/'qa-screenshot.png'; page.screenshot(path=str(screenshot),full_page=True); browser_obj.close()
-            browser={'available':True,'passed':bool(response and response.ok and not errors),'status':response.status if response else None,'errors':errors,'screenshot':str(screenshot)}
+                screenshot=p.root/'qa-screenshot.png'
+                page.screenshot(path=str(screenshot),full_page=True)
+                browser_obj.close()
+            browser={'available':True,'passed':bool(response and response.ok and not errors and not failed_requests),
+                     'status':response.status if response else None,'errors':errors,'failed_requests':failed_requests,
+                     'screenshot':str(screenshot)}
         except Exception as e:
             browser={'available':True,'passed':False,'reason':str(e)}
         finally:
@@ -191,8 +198,17 @@ class V6ExistingProjectDeveloper(V5DeploymentAgent):
                 if json.loads(snap['package.json']).get('scripts',{}).get('test'): commands=['npm test -- --runInBand']
             except Exception: pass
         results=self.tests.run(project,commands) if commands else []
-        result={'version':6,'project':project,'plan':{'project_name':project.name,'test_commands':commands},'existing_project_mode':True,'change_applied':changed,'change_explanation':explanation,'test_results':self.serial_results(results),'validation':self.validate(project)}
-        if changed and results and all(x.passed for x in results):
+        verified=bool(results) and all(x.passed for x in results)
+        if changed and not verified:
+            self._restore(project,before)
+            changed=False
+            explanation=(explanation+' ' if explanation else '')+'Change was rolled back because the project had no passing automated test evidence.'
+        result={'version':6,'project':project,'plan':{'project_name':project.name,'test_commands':commands},
+                'existing_project_mode':True,'change_applied':changed,'change_explanation':explanation,
+                'test_results':self.serial_results(results),'validation':self.validate(project),
+                'quality_gate':{'passed':verified,'tests_defined':bool(commands),'tests_executed':bool(results),
+                                'tests_passed':verified}}
+        if changed and verified:
             result['deployment']=GitHubRenderDeployer(project,self.config).deploy()
         elif changed:
             result['deployment']={'success':False,'provider':'render','reason':'Deployment was blocked because the modified project did not pass its automated tests.'}
