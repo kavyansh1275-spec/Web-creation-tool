@@ -24,12 +24,16 @@ class V1WebsiteGenerator(BaseVersion):
 class V2FullStackDeveloper(V1WebsiteGenerator):
     number=2; name='Full-Stack Developer'
     def run(self,request,context=None):
-        r=super().run(request,context); p=r['project']
-        if not (p.root/'README.md').exists(): (p.root/'README.md').write_text('# Generated Project\n\nCreated by Web Creation Tool.\n',encoding='utf-8')
-        if not (p.root/'.gitignore').exists(): (p.root/'.gitignore').write_text('__pycache__/\n.env\n',encoding='utf-8')
-        r['version']=2; r['stack_detected']=self.detect_stack(p)
-        r['deployment']=GitHubRenderDeployer(p,self.config).deploy()
-        return r
+        project,plan=self.build(request)
+        if not (project.root/'README.md').exists(): (project.root/'README.md').write_text('# Generated Project\n\nCreated by Web Creation Tool.\n',encoding='utf-8')
+        if not (project.root/'.gitignore').exists(): (project.root/'.gitignore').write_text('__pycache__/\n.env\n',encoding='utf-8')
+        result={'version':2,'project':project,'plan':plan,'validation':self.validate(project),'stack_detected':self.detect_stack(project)}
+        if plan.get('offline'):
+            result['offline']=True
+            result['deployment']={'success':False,'provider':'render','reason':'Offline generation did not produce a production-ready application; deployment was skipped.'}
+        else:
+            result['deployment']=GitHubRenderDeployer(project,self.config).deploy()
+        return result
     def detect_stack(self,p):
         s=self.pm.snapshot(p); return {'python':any(x.endswith('.py') for x in s),'javascript':any(x.endswith(('.js','.jsx','.ts','.tsx')) for x in s),'html':any(x.endswith('.html') for x in s)}
 
@@ -58,7 +62,10 @@ class V3AutonomousDebugger(V2FullStackDeveloper):
                 except Exception: pass
             r={'version':3,'project':project,'plan':{'project_name':project.name,'test_commands':commands},'validation':self.validate(project)}
         else:
-            r=super().run(request,context)
+            project,plan=self.build(request)
+            r={'version':3,'project':project,'plan':plan,'validation':self.validate(project)}
+            if plan.get('offline'):
+                r['offline']=True
         p=r['project']; commands=r['plan'].get('test_commands',[])
         timeout=getattr(self.config,'command_timeout',60) if self.config else 60
         limit=getattr(self.config,'max_debug_iterations',3) if self.config else 3
