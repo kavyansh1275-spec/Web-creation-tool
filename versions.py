@@ -1,6 +1,7 @@
 from pathlib import Path
 import json, re, shutil, zipfile, os, subprocess, threading, http.server
 from core import Planner, RepairEngine
+from deployer import GitHubRenderDeployer
 
 class BaseVersion:
     def __init__(self,pm,planner,tests,config=None): self.pm=pm; self.planner=planner; self.tests=tests; self.config=config
@@ -15,7 +16,10 @@ class BaseVersion:
 class V1WebsiteGenerator(BaseVersion):
     number=1; name='Website Generator'
     def run(self,request,context=None):
-        project,plan=self.build(request); return {'version':1,'project':project,'plan':plan,'validation':self.validate(project)}
+        project,plan=self.build(request)
+        result={'version':1,'project':project,'plan':plan,'validation':self.validate(project)}
+        result['deployment']=GitHubRenderDeployer(project,self.config).deploy()
+        return result
 
 class V2FullStackDeveloper(V1WebsiteGenerator):
     number=2; name='Full-Stack Developer'
@@ -23,7 +27,9 @@ class V2FullStackDeveloper(V1WebsiteGenerator):
         r=super().run(request,context); p=r['project']
         if not (p.root/'README.md').exists(): (p.root/'README.md').write_text('# Generated Project\n\nCreated by Web Creation Tool.\n',encoding='utf-8')
         if not (p.root/'.gitignore').exists(): (p.root/'.gitignore').write_text('__pycache__/\n.env\n',encoding='utf-8')
-        r['version']=2; r['stack_detected']=self.detect_stack(p); return r
+        r['version']=2; r['stack_detected']=self.detect_stack(p)
+        r['deployment']=GitHubRenderDeployer(p,self.config).deploy()
+        return r
     def detect_stack(self,p):
         s=self.pm.snapshot(p); return {'python':any(x.endswith('.py') for x in s),'javascript':any(x.endswith(('.js','.jsx','.ts','.tsx')) for x in s),'html':any(x.endswith('.html') for x in s)}
 
@@ -116,7 +122,10 @@ class V5DeploymentAgent(V4VisualQA):
         elif os.getenv('NETLIFY_AUTH_TOKEN') and shutil.which('netlify'):
             proc=subprocess.run(['netlify','deploy','--prod','--dir','.'],cwd=p.root,text=True,capture_output=True,timeout=180,env={**os.environ,'NETLIFY_AUTH_TOKEN':os.getenv('NETLIFY_AUTH_TOKEN')}); out=(proc.stdout or '')+(proc.stderr or '')
             deploy={'provider':'netlify','success':proc.returncode==0,'output':out[-12000:]}
-        r['deployment']={'artifact':str(artifact.resolve()),'artifact_ready':artifact.exists(),'external':deploy}; r['version']=5; return r
+        real=GitHubRenderDeployer(p,self.config).deploy()
+        if real.get('success'):
+            deploy={'provider':'render','success':True,'url':real.get('url'),'service_id':real.get('service_id'),'output':real.get('url','')}
+        r['deployment']={'artifact':str(artifact.resolve()),'artifact_ready':artifact.exists(),'external':deploy,'real':real}; r['version']=5; return r
 
 class V6ExistingProjectDeveloper(V5DeploymentAgent):
     number=6; name='Existing Project Developer'
@@ -145,7 +154,9 @@ class V6ExistingProjectDeveloper(V5DeploymentAgent):
                 if json.loads(snap['package.json']).get('scripts',{}).get('test'): commands=['npm test -- --runInBand']
             except Exception: pass
         results=self.tests.run(project,commands) if commands else []
-        return {'version':6,'project':project,'plan':{'project_name':project.name,'test_commands':commands},'existing_project_mode':True,'change_applied':changed,'change_explanation':explanation,'test_results':self.serial_results(results),'validation':self.validate(project)}
+        result={'version':6,'project':project,'plan':{'project_name':project.name,'test_commands':commands},'existing_project_mode':True,'change_applied':changed,'change_explanation':explanation,'test_results':self.serial_results(results),'validation':self.validate(project)}
+        result['deployment']=GitHubRenderDeployer(project,self.config).deploy()
+        return result
 
 class V7AutonomousAIProductEngineer(V6ExistingProjectDeveloper):
     number=7; name='Autonomous AI Product Engineer'
