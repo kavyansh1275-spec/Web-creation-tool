@@ -156,10 +156,15 @@ def show_result(result):
         st.code(str(project.root.resolve()))
 
     if version in (1, 2, 6, 7) and project:
-        preview_url = st.context.url + "?preview=" + project.name
-        st.success("Your website is ready.")
-        st.link_button("🌐 Open your website", preview_url)
-        st.caption("This opens the generated website preview directly from the Web Creation Tool.")
+        deployment = result.get("deployment", {})
+        if deployment.get("success") and deployment.get("url"):
+            st.success("Your website is live on its own public deployment.")
+            st.link_button("🌐 Open your live website", deployment["url"])
+            st.caption("This is the standalone public deployment, not a Web Creation Tool preview.")
+        else:
+            st.warning("The project was created, but it is not publicly deployed yet.")
+            if deployment.get("reason"):
+                st.caption(deployment["reason"])
 
     if version == 3:
         results = result.get("test_results", [])
@@ -226,10 +231,14 @@ def show_result(result):
         external = deployment.get("external", {})
         if external.get("success"):
             st.success("Your website has been deployed.")
-            output = external.get("output", "")
-            urls = re.findall(r"https?://[^\s\)]+", output)
-            for index, url in enumerate(urls[:5]):
-                st.link_button("🌐 Open deployed website", url, key=f"deploy-url-{index}")
+            url = external.get("url")
+            if url:
+                st.link_button("🌐 Open deployed website", url, key="deploy-url-render")
+            else:
+                output = external.get("output", "")
+                urls = re.findall(r"https?://[^\s\)]+", output)
+                for index, url in enumerate(urls[:5]):
+                    st.link_button("🌐 Open deployed website", url, key=f"deploy-url-{index}")
         elif external.get("reason"):
             st.info(external["reason"])
 
@@ -258,10 +267,14 @@ def show_result(result):
         deployment = report.get("deployment") or {}
         external = deployment.get("external", {}) if isinstance(deployment, dict) else {}
         if external.get("success"):
-            output = external.get("output", "")
-            urls = re.findall(r"https?://[^\s\)]+", output)
-            for index, url in enumerate(urls[:5]):
-                st.link_button("🌐 Open deployed website", url, key=f"v7-url-{index}")
+            url = external.get("url")
+            if url:
+                st.link_button("🌐 Open deployed website", url, key="v7-url-render")
+            else:
+                output = external.get("output", "")
+                urls = re.findall(r"https?://[^\s\)]+", output)
+                for index, url in enumerate(urls[:5]):
+                    st.link_button("🌐 Open deployed website", url, key=f"v7-url-{index}")
 
     with st.expander("Technical result"):
         st.json({key: value for key, value in result.items() if key != "project"})
