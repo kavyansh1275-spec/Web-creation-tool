@@ -18,7 +18,8 @@ class V1WebsiteGenerator(BaseVersion):
     def run(self,request,context=None):
         project,plan=self.build(request)
         result={'version':1,'project':project,'plan':plan,'validation':self.validate(project)}
-        result['deployment']=GitHubRenderDeployer(project,self.config).deploy()
+        result['offline']=bool(plan.get('offline'))
+        result['deployment']=({'success':False,'provider':'render','reason':'Offline generation was not deployed.'} if plan.get('offline') else GitHubRenderDeployer(project,self.config).deploy())
         return result
 
 class V2FullStackDeveloper(V1WebsiteGenerator):
