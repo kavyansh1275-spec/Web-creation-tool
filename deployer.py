@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import base64
+import hashlib
 import json
 import os
 import re
@@ -105,7 +106,8 @@ class GitHubRenderDeployer:
 
     def _commit_file(self, path, content, message):
         owner, repo = self._repo_path()
-        encoded = base64.b64encode(content.encode("utf-8")).decode("ascii")
+        raw = content if isinstance(content, bytes) else content.encode("utf-8")
+        encoded = base64.b64encode(raw).decode("ascii")
         payload = {"message": message, "content": encoded, "branch": self.branch}
         sha = self._existing_sha(path)
         if sha:
@@ -127,7 +129,7 @@ class GitHubRenderDeployer:
             relative = path.relative_to(self.project).as_posix()
             if relative.startswith(".deployment"):
                 continue
-            files.append((f"{target}/{relative}", path.read_text(encoding="utf-8", errors="replace")))
+            files.append((f"{target}/{relative}", path.read_bytes()))
         if not files:
             raise DeploymentError("The generated project contains no deployable files.")
         for path, content in files:
@@ -192,7 +194,9 @@ class GitHubRenderDeployer:
 
         target = f"{self.base_path}/{self.slug(self.project.name)}"
         kind = "static" if (self.project / "index.html").exists() else "web"
-        service_name = self.slug(self.project.name)
+        identity = hashlib.sha256(str(self.project).encode("utf-8")).hexdigest()[:8]
+        service_name = self.slug(self.project.name) + "-" + identity
+        target = target + "-" + identity
         try:
             file_count = self._push_project(target)
             service = self._render_service(service_name, target, kind)
